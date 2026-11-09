@@ -1,0 +1,39 @@
+name: Build, Test & Release
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run Automated Unit Tests (>80% Coverage Gate)
+        run: cmd /c run-tests.bat
+
+      - name: Build Portable KeyLock.exe
+        run: cmd /c build.bat
+
+      - name: Verify KeyLock.exe CLI Emergency Unlock
+        run: .\KeyLock.exe --unlock
+
+      - name: Upload KeyLock.exe Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyLock-Portable-x64
+          path: KeyLock.exe
+
+      - name: Publish GitHub Release (on Tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: KeyLock.exe
+          generate_release_notes: true
+

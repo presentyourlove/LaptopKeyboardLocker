@@ -1,0 +1,18 @@
+# Build results
+bin/
+obj/
+TestRunner.exe
+
+# Runtime local files
+settings.ini
+disabled_devices.state
+diagnostics.jsonl
+*.tmp
+
+# Visual Studio / Rider / VSCode
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
