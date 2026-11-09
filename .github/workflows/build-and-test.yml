@@ -10,16 +10,17 @@ on:
 permissions:
   contents: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build-and-test:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Checkout Repository (Native Git - Zero Node20 Deprecation Warnings)
+        run: |
+          git init .
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git fetch --depth 1 origin "${{ github.sha }}"
+          git checkout -f FETCH_HEAD
 
       - name: Run Automated Unit Tests (>80% Coverage Gate)
         run: cmd /c run-tests.bat
@@ -29,12 +30,6 @@ jobs:
 
       - name: Verify KeyLock.exe CLI Emergency Unlock
         run: .\KeyLock.exe --unlock
-
-      - name: Upload KeyLock.exe Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: KeyLock-Portable-x64
-          path: KeyLock.exe
 
       - name: Publish or Update GitHub Release (on Tag)
         if: startsWith(github.ref, 'refs/tags/v')

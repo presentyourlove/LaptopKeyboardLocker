@@ -184,6 +184,7 @@ namespace LaptopKeyboardLocker.UI
                 BackColor = Color.White,
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
             };
+            txtHotkey.Leave += OnTxtHotkeyLeave;
 
             btnRecordHotkey = new Button
             {
@@ -455,6 +456,19 @@ namespace LaptopKeyboardLocker.UI
             }
         }
 
+        private void CancelHotkeyRecording()
+        {
+            if (!isRecordingHotkey) return;
+            isRecordingHotkey = false;
+            txtHotkey.Text = ConfigManager.Current.Hotkey.ToString();
+            txtHotkey.BackColor = Color.White;
+        }
+
+        private void OnTxtHotkeyLeave(object sender, EventArgs e)
+        {
+            CancelHotkeyRecording();
+        }
+
         private void OnBtnRecordHotkeyClick(object sender, EventArgs e)
         {
             isRecordingHotkey = true;
@@ -485,6 +499,14 @@ namespace LaptopKeyboardLocker.UI
                 e.Handled = true;
 
                 Keys key = e.KeyCode;
+
+                // 按下 Esc 鍵安靜取消錄製並恢復原熱鍵顯示
+                if (key == Keys.Escape)
+                {
+                    CancelHotkeyRecording();
+                    return;
+                }
+
                 if (HotkeyModel.IsModifierKeyOnly(key))
                 {
                     return;
@@ -520,7 +542,17 @@ namespace LaptopKeyboardLocker.UI
 
                 if (appContext != null)
                 {
-                    appContext.RefreshGlobalHotkeyRegistration();
+                    bool registered = appContext.RefreshGlobalHotkeyRegistration();
+                    if (!registered)
+                    {
+                        MessageBox.Show(
+                            this,
+                            LocalizationManager.Get("HotkeyConflictNotice"),
+                            LocalizationManager.Get("AppTitle"),
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Information
+                        );
+                    }
                 }
                 return;
             }
@@ -553,6 +585,7 @@ namespace LaptopKeyboardLocker.UI
             // 選項 A：使用者點擊右上角 [X] 時縮小至系統匣背景常駐
             if (!allowRealClose && e.CloseReason == CloseReason.UserClosing && ConfigManager.Current.CloseToTray)
             {
+                CancelHotkeyRecording();
                 e.Cancel = true;
                 this.Hide();
                 if (appContext != null)
@@ -575,4 +608,3 @@ namespace LaptopKeyboardLocker.UI
         }
     }
 }
-

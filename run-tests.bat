@@ -39,5 +39,5 @@ echo [2/2] Running Automated Unit Tests...
 set TEST_EXIT_CODE=%ERRORLEVEL%
 
 if exist "%~dp0TestRunner.exe" del /q "%~dp0TestRunner.exe"
+if exist "%~dp0diagnostics.jsonl" del /q "%~dp0diagnostics.jsonl"
 exit /b %TEST_EXIT_CODE%
-

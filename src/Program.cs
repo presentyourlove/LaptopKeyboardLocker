@@ -10,6 +10,8 @@ namespace LaptopKeyboardLocker
     internal static class Program
     {
         private const string MutexName = @"Local\LaptopKeyboardLocker_SingleInstance_Mutex";
+        private const int ElevatedWaitTimeoutMs = 5000;
+        private const int NormalWaitTimeoutMs = 300;
 
         [STAThread]
         private static void Main(string[] args)
@@ -26,6 +28,7 @@ namespace LaptopKeyboardLocker
             bool startMinimized = false;
             bool startLocked = false;
             bool emergencyUnlockAndExit = false;
+            bool isElevatedRestart = false;
 
             if (args != null)
             {
@@ -44,6 +47,10 @@ namespace LaptopKeyboardLocker
                     {
                         emergencyUnlockAndExit = true;
                     }
+                    else if (arg == "--elevated" || arg == "-e")
+                    {
+                        isElevatedRestart = true;
+                    }
                 }
             }
 
@@ -55,29 +62,57 @@ namespace LaptopKeyboardLocker
                 return;
             }
 
-            // 3. 單一實例檢查 (Mutex)
+            // 3. 單一實例檢查 (Mutex)，支援提權重啟時等待舊程序釋放鎖以消除競態條件
             bool createdNew;
-            using (Mutex mutex = new Mutex(true, MutexName, out createdNew))
+            using (Mutex mutex = new Mutex( false, MutexName, out createdNew))
             {
-                if (!createdNew)
+                bool hasHandle = false;
+                try
                 {
-                    return;
+                    int waitTimeout = isElevatedRestart ? ElevatedWaitTimeoutMs : NormalWaitTimeoutMs;
+                    try
+                    {
+                        hasHandle = mutex.WaitOne(waitTimeout, false);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        // 若前一個實例異常終止遺留 Mutex，直接接管所有權
+                        hasHandle = true;
+                    }
+
+                    if (!hasHandle)
+                    {
+                        return;
+                    }
+
+                    // 4. 掛載崩潰與退出防鎖死安全保護
+                    Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+                    Application.ThreadException += OnThreadException;
+                    AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+                    AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+
+                    DiagnosticLogger.Info("AppStart", "Admin=" + DeviceControlManager.IsAdministrator());
+
+                    using (TrayAppContext context = new TrayAppContext(startMinimized, startLocked))
+                    {
+                        Application.Run(context);
+                    }
                 }
-
-                // 4. 掛載崩潰與退出防鎖死安全保護
-                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-                Application.ThreadException += OnThreadException;
-                AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
-                AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
-
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-
-                DiagnosticLogger.Info("AppStart", "Admin=" + DeviceControlManager.IsAdministrator());
-
-                using (TrayAppContext context = new TrayAppContext(startMinimized, startLocked))
+                finally
                 {
-                    Application.Run(context);
+                    if (hasHandle)
+                    {
+                        try
+                        {
+                            mutex.ReleaseMutex();
+                        }
+                        catch
+                        {
+                        }
+                    }
                 }
             }
         }
@@ -122,4 +157,3 @@ namespace LaptopKeyboardLocker
         }
     }
 }
-

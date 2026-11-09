@@ -53,8 +53,9 @@ namespace LaptopKeyboardLocker.Core
             { "LblHotkey", "解鎖/鎖定快速鍵：" },
             { "BtnRecordHotkey", "錄製熱鍵" },
             { "BtnResetHotkey", "還原預設" },
-            { "RecordingPrompt", "請按下組合鍵 (如 Ctrl+Alt+K)..." },
+            { "RecordingPrompt", "請按下組合鍵 (按 Esc 取消)..." },
             { "InvalidHotkeyNotice", "為防止誤觸，自訂熱鍵必須包含至少一個修飾鍵 (Ctrl/Alt/Shift/Win) 搭配一般鍵，或使用 F1~F12 功能鍵。" },
+            { "HotkeyConflictNotice", "注意：此組合鍵目前已被系統其他常駐軟體佔用，可能無法在未鎖定時透過熱鍵直接上鎖（建議更換其他組合鍵）。" },
 
             // 防呆與安全選項
             { "GrpSafety", "安全、防呆與偏好設定 (Safety & Preferences)" },
@@ -111,8 +112,9 @@ namespace LaptopKeyboardLocker.Core
             { "LblHotkey", "Lock/Unlock Hotkey:" },
             { "BtnRecordHotkey", "Record" },
             { "BtnResetHotkey", "Default" },
-            { "RecordingPrompt", "Press key combo (e.g. Ctrl+Alt+K)..." },
+            { "RecordingPrompt", "Press key combo (Esc to cancel)..." },
             { "InvalidHotkeyNotice", "To prevent accidental unlocking, custom hotkeys must include at least one modifier (Ctrl/Alt/Shift/Win) + a key, or use F1~F12." },
+            { "HotkeyConflictNotice", "Note: This hotkey is currently occupied by another application in Windows. Consider choosing a different key combination." },
 
             // Safety & Options
             { "GrpSafety", "Safety & Preferences" },

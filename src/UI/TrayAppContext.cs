@@ -42,6 +42,7 @@ namespace LaptopKeyboardLocker.UI
         private Timer debounceDeviceTimer;
         private Timer safetyTimeoutTimer;
         private bool hasShownMinimizeBalloon = false;
+        private bool isDisposed = false;
 
         public bool IsLocked
         {
@@ -123,7 +124,7 @@ namespace LaptopKeyboardLocker.UI
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.Clear(Color.Transparent);
 
-                using (SolidBrush bgBrush = new SolidBrush( badgeColor))
+                using (SolidBrush bgBrush = new SolidBrush(badgeColor))
                 {
                     g.FillEllipse(bgBrush, 2, 2, 28, 28);
                 }
@@ -181,17 +182,23 @@ namespace LaptopKeyboardLocker.UI
 
         private void UpdateTrayLocalization()
         {
-            menuOpen.Text = LocalizationManager.Get("TrayShow");
-            menuToggleLock.Text = stateManager.IsLocked
-                ? LocalizationManager.Get("TrayUnlock")
-                : LocalizationManager.Get("TrayLock");
-            menuExit.Text = LocalizationManager.Get("TrayExit");
-            trayIcon.Text = stateManager.IsLocked
-                ? LocalizationManager.Get("TrayTipLocked")
-                : LocalizationManager.Get("TrayTipUnlocked");
+            if (menuOpen != null) menuOpen.Text = LocalizationManager.Get("TrayShow");
+            if (menuToggleLock != null)
+            {
+                menuToggleLock.Text = stateManager.IsLocked
+                    ? LocalizationManager.Get("TrayUnlock")
+                    : LocalizationManager.Get("TrayLock");
+            }
+            if (menuExit != null) menuExit.Text = LocalizationManager.Get("TrayExit");
+            if (trayIcon != null)
+            {
+                trayIcon.Text = stateManager.IsLocked
+                    ? LocalizationManager.Get("TrayTipLocked")
+                    : LocalizationManager.Get("TrayTipUnlocked");
+            }
         }
 
-        public void RefreshGlobalHotkeyRegistration()
+        public bool RefreshGlobalHotkeyRegistration()
         {
             UnregisterGlobalHotkey();
             hookManager.RefreshCachedHotkey();
@@ -201,15 +208,21 @@ namespace LaptopKeyboardLocker.UI
             }
             if (!stateManager.IsLocked || stateManager.CurrentMode == LockMode.HardwareDisable)
             {
-                RegisterGlobalHotkey();
+                return RegisterGlobalHotkey();
             }
+            return true;
         }
 
-        private void RegisterGlobalHotkey()
+        private bool RegisterGlobalHotkey()
         {
-            if (msgWindow == null || msgWindow.Handle == IntPtr.Zero) return;
+            if (msgWindow == null || msgWindow.Handle == IntPtr.Zero) return false;
             HotkeyModel hk = ConfigManager.Current.Hotkey;
-            Win32Api.RegisterHotKey(msgWindow.Handle, GlobalHotkeyId, hk.GetWin32Modifiers(), (uint)hk.KeyCode);
+            bool ok = Win32Api.RegisterHotKey(msgWindow.Handle, GlobalHotkeyId, hk.GetWin32Modifiers(), (uint)hk.KeyCode);
+            if (!ok)
+            {
+                DiagnosticLogger.Warn("RegisterHotKeyOccupied", hk.ToString());
+            }
+            return ok;
         }
 
         private void UnregisterGlobalHotkey()
@@ -562,9 +575,11 @@ namespace LaptopKeyboardLocker.UI
             {
                 PerformUnlock(true);
 
+                // 帶入 --elevated 參數，讓新啟動的管理員實例等待最多 5 秒待舊實例釋放 Mutex
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = Application.ExecutablePath,
+                    Arguments = "--elevated",
                     UseShellExecute = true,
                     Verb = "runas"
                 };
@@ -579,42 +594,93 @@ namespace LaptopKeyboardLocker.UI
 
         public void ExitCleanly()
         {
-            PerformUnlock(true);
-            UnregisterGlobalHotkey();
-
-            if (safetyTimeoutTimer != null) safetyTimeoutTimer.Stop();
-            if (debounceDeviceTimer != null) debounceDeviceTimer.Stop();
-
-            SystemEvents.SessionEnding -= OnSessionEnding;
-            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-            SystemEvents.SessionSwitch -= OnSessionSwitch;
-            LocalizationManager.LanguageChanged -= OnLanguageChanged;
-
-            if (trayIcon != null)
-            {
-                trayIcon.Visible = false;
-                trayIcon.Dispose();
-            }
-
-            if (hudForm != null)
-            {
-                hudForm.Close();
-                hudForm.Dispose();
-            }
-
-            if (mainForm != null)
-            {
-                mainForm.SetAllowRealClose(true);
-                mainForm.Close();
-                mainForm.Dispose();
-            }
-
-            if (msgWindow != null)
-            {
-                msgWindow.DestroyHandle();
-            }
-
+            Dispose(true);
             Application.Exit();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (!isDisposed)
+            {
+                if (disposing)
+                {
+                    PerformUnlock(true);
+                    UnregisterGlobalHotkey();
+
+                    if (safetyTimeoutTimer != null)
+                    {
+                        safetyTimeoutTimer.Stop();
+                        safetyTimeoutTimer.Dispose();
+                        safetyTimeoutTimer = null;
+                    }
+
+                    if (debounceDeviceTimer != null)
+                    {
+                        debounceDeviceTimer.Stop();
+                        debounceDeviceTimer.Dispose();
+                        debounceDeviceTimer = null;
+                    }
+
+                    SystemEvents.SessionEnding -= OnSessionEnding;
+                    SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+                    SystemEvents.SessionSwitch -= OnSessionSwitch;
+                    LocalizationManager.LanguageChanged -= OnLanguageChanged;
+
+                    if (hookManager != null)
+                    {
+                        hookManager.Dispose();
+                    }
+
+                    if (trayIcon != null)
+                    {
+                        trayIcon.Visible = false;
+                        trayIcon.Dispose();
+                        trayIcon = null;
+                    }
+
+                    if (trayMenu != null)
+                    {
+                        trayMenu.Dispose();
+                        trayMenu = null;
+                    }
+
+                    if (unlockedIcon != null)
+                    {
+                        unlockedIcon.Dispose();
+                        unlockedIcon = null;
+                    }
+
+                    if (lockedIcon != null)
+                    {
+                        lockedIcon.Dispose();
+                        lockedIcon = null;
+                    }
+
+                    if (hudForm != null)
+                    {
+                        hudForm.Close();
+                        hudForm.Dispose();
+                        hudForm = null;
+                    }
+
+                    if (mainForm != null)
+                    {
+                        mainForm.SetAllowRealClose(true);
+                        mainForm.Close();
+                        mainForm.Dispose();
+                        mainForm = null;
+                    }
+
+                    if (msgWindow != null && msgWindow.Handle != IntPtr.Zero)
+                    {
+                        msgWindow.DestroyHandle();
+                    }
+                }
+
+                isDisposed = true;
+            }
+
+            base.Dispose(disposing);
         }
 
         /// <summary>
@@ -648,4 +714,3 @@ namespace LaptopKeyboardLocker.UI
         }
     }
 }
-
