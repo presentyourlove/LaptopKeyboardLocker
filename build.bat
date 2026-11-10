@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal
 
 echo ========================================================
-echo   Building LaptopKeyboardLocker -> KeyLock.exe (64-bit)
+echo   Building LaptopKeyboardLocker [KeyLock.exe 64-bit]
 echo ========================================================
 
 set CSC="C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
@@ -42,4 +42,3 @@ if %ERRORLEVEL% neq 0 (
 
 echo [SUCCESS] Built standalone portable executable: %~dp0KeyLock.exe
 exit /b 0
-

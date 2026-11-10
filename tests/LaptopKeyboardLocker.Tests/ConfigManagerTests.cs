@@ -9,7 +9,7 @@ namespace LaptopKeyboardLocker.Tests
     {
         public static void RunAll(TestAssert assert)
         {
-            assert.Section("ConfigManager & DiagnosticLogger 單元測試 (Persistence & Resilience)");
+            assert.Section("ConfigManager & Build Script Integrity 單元測試 (Persistence & Build Safety)");
 
             string tempFile = Path.Combine(Path.GetTempPath(), "keylock_test_" + Guid.NewGuid().ToString("N") + ".ini");
 
@@ -61,6 +61,24 @@ namespace LaptopKeyboardLocker.Tests
                 string escaped = DiagnosticLogger.EscapeJson("Path\\Test\"Quote\nLine");
                 assert.AreEqual("Path\\\\Test\\\"Quote\\nLine", escaped,
                     "DiagnosticLogger.EscapeJson 應正確轉義反斜線、雙引號與換行字元");
+
+                // 5. 建置腳本 (build.bat) 防止 echo 未轉義 '>' 重新導向污染執行檔之迴歸測試
+                string buildBatPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "build.bat");
+                if (File.Exists(buildBatPath))
+                {
+                    string[] batLines = File.ReadAllLines(buildBatPath);
+                    bool hasDangerousEchoRedirect = false;
+                    foreach (string rawLine in batLines)
+                    {
+                        string trimmed = rawLine.Trim();
+                        if (trimmed.StartsWith("echo ", StringComparison.OrdinalIgnoreCase) && trimmed.Contains(">"))
+                        {
+                            hasDangerousEchoRedirect = true;
+                        }
+                    }
+                    assert.IsFalse(hasDangerousEchoRedirect,
+                        "build.bat 中的 echo 指令不可包含未轉義的 '>' 重新導向符號，防止覆寫破壞執行檔");
+                }
             }
             finally
             {
@@ -72,4 +90,3 @@ namespace LaptopKeyboardLocker.Tests
         }
     }
 }
-
