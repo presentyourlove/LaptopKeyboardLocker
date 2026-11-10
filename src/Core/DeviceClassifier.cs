@@ -37,11 +37,12 @@ namespace LaptopKeyboardLocker.Core
                 return DeviceCategory.Unknown;
             }
 
-            // 1. 優先確認傳統 ACPI / PS/2 與現代 HID-over-I2C 筆電內建鍵盤硬體特徵
+            // 1. 優先確認傳統 ACPI / PS/2、現代 HID-over-I2C 與電競/商用筆電內建嵌入式 HID 鍵盤硬體特徵
             // PNP0303 / PNP030B / PNP0320: 標準 PS/2 內建鍵盤
             // ACPI\*: ACPI 系統匯流排原生鍵盤節點
             // I2C\*: I2C 控制器節點
             // HID\MSFT*, HID\ATK*, HID\ELAN*, HID\DLLK*, HID\LEN*, HID\SYNA*, HID\VEN_*: 現代輕薄筆電 HID-over-I2C 內建鍵盤
+            // ASUS N-Key (VID_0B05&PID_1854 等) / ITE 內建控制器 (VID_048D) / MSI SteelSeries 內建鍵盤
             if (id.Contains("PNP0303") || id.Contains("PNP030B") || id.Contains("PNP0320") ||
                 id.StartsWith("ACPI\\", StringComparison.OrdinalIgnoreCase) ||
                 id.StartsWith("I2C\\", StringComparison.OrdinalIgnoreCase) ||
@@ -51,7 +52,8 @@ namespace LaptopKeyboardLocker.Core
                 id.StartsWith("HID\\DLLK", StringComparison.OrdinalIgnoreCase) ||
                 id.StartsWith("HID\\LEN", StringComparison.OrdinalIgnoreCase) ||
                 id.StartsWith("HID\\SYNA", StringComparison.OrdinalIgnoreCase) ||
-                id.StartsWith("HID\\VEN_", StringComparison.OrdinalIgnoreCase))
+                id.StartsWith("HID\\VEN_", StringComparison.OrdinalIgnoreCase) ||
+                IsKnownLaptopInternalHid(id, name))
             {
                 return DeviceCategory.InternalKeyboard;
             }
@@ -76,6 +78,51 @@ namespace LaptopKeyboardLocker.Core
         }
 
         /// <summary>
+        /// 識別電競與現代筆電常見透過內部 USB/I2C 橋接之嵌入式內建鍵盤控制器（如 ASUS ROG/TUF N-Key、ITE Tech、MSI SteelSeries、Elan、Chicony）。
+        /// </summary>
+        public static bool IsKnownLaptopInternalHid(string upperId, string upperName)
+        {
+            if (string.IsNullOrEmpty(upperId))
+            {
+                return false;
+            }
+
+            string safeName = upperName ?? string.Empty;
+
+            // ASUS ROG / TUF / Zephyrus / Zenbook / Vivobook 筆電內建 N-Key 鍵盤控制器 (VID_0B05)
+            // 排除華碩外接機械鍵盤型號關鍵字
+            if (upperId.Contains("VID_0B05&"))
+            {
+                if (safeName.Contains("FALCHION") || safeName.Contains("AZOTH") ||
+                    safeName.Contains("SCOPE") || safeName.Contains("CLAYMORE") ||
+                    safeName.Contains("FLARE") || safeName.Contains("TUF GAMING K"))
+                {
+                    return false;
+                }
+                return true;
+            }
+
+            // ITE Tech (VID_048D) / Elan (VID_04F3) / Synaptics (VID_06CB) / Chicony (VID_04F2) 筆電內建嵌入式鍵盤控制器
+            if (upperId.Contains("VID_048D&") ||
+                upperId.Contains("VID_04F3&") ||
+                upperId.Contains("VID_06CB&") ||
+                upperId.Contains("VID_04F2&"))
+            {
+                return true;
+            }
+
+            // MSI 筆電內建 SteelSeries / 嵌入式鍵盤控制器
+            if (upperId.Contains("VID_1038&PID_1122") ||
+                upperId.Contains("VID_1038&PID_113A") ||
+                upperId.Contains("VID_1770&PID_FF00"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// 便捷方法：是否為內建筆電鍵盤。
         /// </summary>
         public static bool IsInternal(string deviceId, string deviceName)
@@ -89,6 +136,38 @@ namespace LaptopKeyboardLocker.Core
         public static bool IsExternal(string deviceId, string deviceName)
         {
             return Classify(deviceId, deviceName) == DeviceCategory.ExternalKeyboard;
+        }
+
+        /// <summary>
+        /// 將 Win32 Raw Input 裝置路徑（例如 \\?\HID#VID_0B05&amp;PID_1854...）正規化為標準 PnP Device ID（HID\VID_0B05&amp;PID_1854...）。
+        /// </summary>
+        public static string NormalizeRawDevicePath(string rawDevicePath)
+        {
+            if (string.IsNullOrEmpty(rawDevicePath))
+            {
+                return string.Empty;
+            }
+
+            string cleaned = rawDevicePath.Trim();
+            if (cleaned.StartsWith("\\\\?\\", StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned.Substring(4);
+            }
+            int guidIdx = cleaned.IndexOf("#{", StringComparison.OrdinalIgnoreCase);
+            if (guidIdx > 0)
+            {
+                cleaned = cleaned.Substring(0, guidIdx);
+            }
+            return cleaned.Replace('#', '\\');
+        }
+
+        /// <summary>
+        /// 判斷 Win32 Raw Input 裝置路徑是否屬於筆電內建鍵盤。
+        /// </summary>
+        public static bool IsRawDevicePathInternal(string rawDevicePath)
+        {
+            string normalized = NormalizeRawDevicePath(rawDevicePath);
+            return IsInternal(normalized, string.Empty);
         }
     }
 }

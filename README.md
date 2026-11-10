@@ -2,8 +2,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows 10/11](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(x64)-0078D6.svg)](#)
-[![Test Coverage: 93.9%](https://img.shields.io/badge/Coverage-93.9%25-brightgreen.svg)](#automated-testing--coverage)
-[![Zero Dependencies](https://img.shields.io/badge/Portable-Single%20EXE%20(~57KB)-orange.svg)](#)
+[![Test Coverage: 94.4%](https://img.shields.io/badge/Coverage-94.4%25-brightgreen.svg)](#building--automated-testing-80-coverage)
+[![Zero Dependencies](https://img.shields.io/badge/Portable-Single%20EXE%20(~60KB)-orange.svg)](#)
 
 A lightweight, zero-dependency, dual-mode **One-Click Laptop Keyboard Locker** for Windows 10/11. Built for cleaning your laptop keyboard, preventing cat/toddler key presses, or placing an external mechanical keyboard directly on top of your laptop keyboard.
 
@@ -18,10 +18,10 @@ A lightweight, zero-dependency, dual-mode **One-Click Laptop Keyboard Locker** f
   * **No Administrator privileges required** — launches and locks instantly.
   * Blocks all standard keys, multimedia keys, volume controls, and `CapsLock`.
   * Tracks physical left/right modifier keys (`VK_LCONTROL`, `VK_RMENU`, etc.) internally and passes modifier `WM_KEYUP` events through to prevent stuck `Ctrl`/`Alt` keys from affecting mouse scrolling or clicks.
-* **Mode 2: Internal Hardware Keyboard Disable (`CfgMgr32`)**
-  * Precisely disables the laptop's built-in keyboard (`ACPI\PNP0303` PS/2 or `HID\MSFT*` / `HID\ATK*` I2C keyboards) while allowing **external USB/Bluetooth keyboards to type normally**.
+* **Mode 2: Internal Keyboard Isolation (`CfgMgr32` + Win32 Raw Input `WM_INPUT` Dual-Tier Engine)**
+  * **Tier 1 (Hardware PnP Control)**: Precisely disables the laptop's built-in keyboard (`ACPI\PNP0303` PS/2, `HID\MSFT*` / `HID\ATK*` I2C, ASUS ROG/TUF N-Key `VID_0B05`, ITE `VID_048D`, MSI SteelSeries `VID_1038`/`VID_1770`, Elan/Synaptics/Chicony) and composite parent nodes while allowing **external USB/Bluetooth keyboards to type 100% normally**.
+  * **Tier 2 (Raw Input Per-Device Software Filter Fallback)**: If Windows refuses to unload a keyboard driver without a reboot (`CR_NEED_RESTART`), Mode 2 automatically engages a Win32 Raw Input (`WM_INPUT` + `GetRawInputDeviceInfo`) per-device filter that blocks **only** keystrokes originating from the built-in keyboard while passing external keyboard keystrokes through seamlessly — never forcing you to disable all keyboards.
   * **Touchpad Safety Whitelist**: Strictly excludes `Touchpad`, `Trackpad`, `Mouse`, and `Sensor` endpoints so your laptop touchpad is never affected.
-  * **Smart PS/2 Fallback**: If a legacy PS/2 keyboard requires a system reboot (`CR_NEED_RESTART`), KeyLock automatically cancels the pending flag and offers to switch to Mode 1 seamlessly.
 
 ### 2. Custom Hotkeys & Bilingual UI (English / 繁體中文)
 * **Default Hotkey**: `Ctrl + Alt + L` to lock/unlock with a **400ms anti-bounce cooldown**.
@@ -71,23 +71,26 @@ Because keyboard lockers utilize Windows Low-Level Keyboard Hooks (`WH_KEYBOARD_
 No external SDK installation is required on Windows 10/11! Both scripts use the native 64-bit compiler (`csc.exe`) included with Windows, or you can use the `.NET 8` SDK (`LaptopKeyboardLocker.csproj`).
 
 ```powershell
-# 1. Run the automated unit test suite (51 tests, 93.9% core coverage)
+# 1. Run the automated unit test suite (61 tests, 94.4% core coverage)
 .\run-tests.bat
 
 # 2. Build the standalone portable KeyLock.exe
 .\build.bat
+
+# 3. Clean, test, build, push to GitHub, and publish GitHub Release in one click
+.\publish-github.bat v1.1.0
 ```
 
 ---
 
 # 繁體中文說明 (Traditional Chinese Guide)
 
-**LaptopKeyboardLocker (`KeyLock.exe`)** 是一款專為 Windows 10/11 筆電設計的極致輕量（僅約 57 KB）、免安裝單一執行檔之**一鍵鎖定／解鎖筆電鍵盤工具**。
+**LaptopKeyboardLocker (`KeyLock.exe`)** 是一款專為 Windows 10/11 筆電設計的極致輕量（僅約 60 KB）、免安裝單一執行檔之**一鍵鎖定／解鎖筆電鍵盤工具**。
 
 ### 核心特色
 1. **雙模鎖定設計**：
    * **模式一（全域軟體鎖定）**：免系統管理員權限，一鍵攔截全鍵盤（含多媒體鍵、音量鍵、CapsLock），適合清理擦拭鍵盤、防止貓咪踩踏或幼童誤觸。內建修飾鍵 `WM_KEYUP` 放行機制，鎖定期間滑鼠滾輪與點擊 100% 正常不卡鍵。
-   * **模式二（僅停用筆電內建鍵盤）**：精準停用筆電內建 PS/2 或 I2C 鍵盤，**外接機械鍵盤可正常打字**。內建觸控板白名單保護，絕不影響筆電觸控板操作；若遇傳統 PS/2 需重開機限制，支援智慧提示並切換至模式一。
+   * **模式二（僅停用筆電內建鍵盤 - 雙層智慧引擎）**：精準識別並停用筆電內建 PS/2、I2C 及電競/商用筆電嵌入式 HID 鍵盤（含 ASUS ROG/TUF N-Key `VID_0B05`、ITE `VID_048D`、MSI SteelSeries `VID_1038` 等），**外接機械鍵盤可 100% 正常打字**。若系統因驅動限制無法動態卸載硬體節點，會自動啟用 **Win32 Raw Input (`WM_INPUT`) 單一裝置過濾引擎**，僅攔截內建鍵盤按鍵並放行外接鍵盤，絕不強迫停用所有鍵盤！
 2. **中／英雙語即時切換與自訂熱鍵**：
    * 預設快速鍵為 **`Ctrl + Alt + L`**（具備 400ms 防彈跳冷卻保護）。
    * 支援自訂錄製快速鍵（具防誤設單鍵驗證）與一鍵「還原預設」。
@@ -99,7 +102,7 @@ No external SDK installation is required on Windows 10/11! Both scripts use the 
    * **關機／睡眠／崩潰自動復原**：關機、休眠、程序異常退出或重開機自檢時，皆會自動復原內建鍵盤。
 4. **資安透明（零按鍵記錄）與高測試覆蓋率**：
    * 嚴格遵循 **Zero Keystroke Logging**，絕不記錄任何按鍵輸入，完全離線運作。
-   * 內建 51 項自動化單元測試（執行 `run-tests.bat`），核心覆蓋率達 **93.9%**。
+   * 內建 61 項自動化單元測試（執行 `run-tests.bat`），核心覆蓋率達 **94.4%**。
 
 ## License
 Licensed under the [MIT License](LICENSE).

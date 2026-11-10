@@ -316,33 +316,21 @@ namespace LaptopKeyboardLocker.UI
                     PlaySoundFeedback(true);
                     return;
                 }
-                else if (disableResult == DeviceDisableResult.NeedRestart ||
-                         disableResult == DeviceDisableResult.DeviceNotFound ||
-                         disableResult == DeviceDisableResult.Failed)
-                {
-                    // 方案 A：PS/2 硬體限制智慧降級詢問
-                    DialogResult fallbackRes = MessageBox.Show(
-                        mainForm,
-                        LocalizationManager.Get("Ps2FallbackMessage"),
-                        LocalizationManager.Get("Ps2FallbackTitle"),
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information
-                    );
 
-                    if (fallbackRes == DialogResult.Yes)
-                    {
-                        ConfigManager.Current.SelectedMode = LockMode.SoftwareHook;
-                        ConfigManager.Save(ConfigManager.Current);
-                        if (mainForm != null)
-                        {
-                            mainForm.SelectSoftwareModeInUi();
-                        }
-                        targetMode = LockMode.SoftwareHook;
-                    }
-                    else
-                    {
-                        return;
-                    }
+                // 若系統因硬體架構限制無法在不重開機下卸載驅動節點（如 NeedRestart），
+                // 自動無縫啟用「Raw Input 單一裝置過濾引擎 (InternalOnlyFilter)」，
+                // 僅攔截筆電內建鍵盤按鍵，讓外接鍵盤 100% 保持正常打字，絕不強迫停用所有鍵盤！
+                UnregisterGlobalHotkey();
+                if (hookManager.StartLock(true))
+                {
+                    stateManager.Lock(LockMode.HardwareDisable);
+                    PlaySoundFeedback(true);
+                    return;
+                }
+                else
+                {
+                    RegisterGlobalHotkey();
+                    return;
                 }
             }
 
@@ -584,7 +572,18 @@ namespace LaptopKeyboardLocker.UI
                     Verb = "runas"
                 };
                 Process.Start(psi);
-                ExitCleanly();
+                if (trayIcon != null)
+                {
+                    trayIcon.Visible = false;
+                }
+                if (mainForm != null && mainForm.IsHandleCreated && !mainForm.IsDisposed)
+                {
+                    mainForm.BeginInvoke(new MethodInvoker(ExitCleanly));
+                }
+                else
+                {
+                    ExitCleanly();
+                }
             }
             catch (Exception ex)
             {

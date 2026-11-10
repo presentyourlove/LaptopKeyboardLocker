@@ -18,13 +18,13 @@ Windows 筆記型電腦使用者在以下兩種核心場景需要鎖定鍵盤：
   - **內部實體修飾鍵狀態追蹤**：自行追蹤 `VK_LCONTROL`/`VK_RCONTROL`、`VK_LMENU`/`VK_RMENU`、`VK_LSHIFT`/`VK_RSHIFT`、`VK_LWIN`/`VK_RWIN`，解決按鍵被攔截後 `GetAsyncKeyState` 失靈問題。
   - **放行修飾鍵 `WM_KEYUP`**：防止進入鎖定時 `Ctrl`/`Alt` 卡住導致滑鼠滾輪變網頁縮放。
   - **1ms 極速非同步派發**：命中解鎖熱鍵時立即吞掉觸發鍵，並透過 `SynchronizationContext.Post` 非同步解鎖，避免觸發 `LowLevelHooksTimeout`。
-- **模式二（內建鍵盤硬體停用 `DeviceControlManager`）**：
-  - 使用 `CfgMgr32.dll` (`CM_Locate_DevNode`, `CM_Disable_DevNode`, `CM_Enable_DevNode`) 並強制以 64 位元程序執行。
-  - 採用 `Win32_PnPEntity WHERE PNPClass = 'Keyboard'` 搭配 `disabled_devices.state` 本地持久化記錄，確保重開機或崩潰後 100% 能找回並啟用內建鍵盤。
-  - 遇傳統 PS/2 鍵盤回報 `CR_NEED_RESTART` 時，自動取消停用標記並智慧引導降級至模式一。
+- **模式二（內建鍵盤雙層隔離引擎 `DeviceControlManager` + `KeyboardHookManager(internalOnlyFilter)`）**：
+  - 第一層（硬體層停用）：使用 `CfgMgr32.dll` (`CM_Locate_DevNode`, `CM_Disable_DevNode`, `CM_Enable_DevNode`, `CM_Get_Parent`) 並強制以 64 位元程序執行。若子集合節點受限，自動向上停用專屬內建複合輸入父節點。
+  - 第二層（Raw Input 單一裝置軟體過濾後援）：若系統因硬體限制回報 `CR_NEED_RESTART`，自動啟用 `WM_INPUT` (`RegisterRawInputDevices` + `GetRawInputDeviceInfo` + `PeekMessage`) 單一裝置過濾引擎，僅攔截筆電內建鍵盤並放行外接鍵盤，絕不強迫停用所有鍵盤。
+  - 採用 `Win32_PnPEntity` 搭配 `disabled_devices.state` 本地持久化記錄，確保重開機或崩潰後 100% 能找回並啟用內建鍵盤。
 
 ### 2. 硬體分類與觸控板絕對保護 (`DeviceClassifier`)
-- 支援傳統 `ACPI\PNP0303` 與現代輕薄筆電 HID-over-I2C（`HID\MSFT`、`HID\ATK`、`HID\VEN_` 等）。
+- 支援傳統 `ACPI\PNP0303`、現代輕薄筆電 HID-over-I2C（`HID\MSFT`、`HID\ATK`、`HID\VEN_` 等），以及電競／商用筆電內建嵌入式 HID 控制器（ASUS ROG/TUF N-Key `VID_0B05`、ITE Tech `VID_048D`、MSI SteelSeries `VID_1038`/`VID_1770`、Elan `VID_04F3`、Synaptics `VID_06CB`、Chicony `VID_04F2`）。
 - **觸控板／滑鼠強制排除白名單**：凡含 `TOUCHPAD`、`TRACKPAD`、`MOUSE`、`SENSOR` 之裝置一律排除，絕不誤傷筆電觸控板。
 
 ### 3. 六重防鎖死安全機制 (6-Tier Fail-Safe)
@@ -35,9 +35,10 @@ Windows 筆記型電腦使用者在以下兩種核心場景需要鎖定鍵盤：
 5. **崩潰與退出保護**：掛載 `UnhandledException`、`ThreadException` 與 `ProcessExit` 強制復原硬體。
 6. **CLI 緊急救援指令**：支援 `KeyLock.exe --unlock` 強制復原硬體並退出。
 
-### 4. 零按鍵記錄 (Zero Keystroke Logging) 與高測試覆蓋率
+### 4. 零按鍵記錄 (Zero Keystroke Logging)、節省 CI 額度與高測試覆蓋率
 - 絕不記錄或外拋任何按鍵內容；`DiagnosticLogger` 僅輸出含 `TraceId` 之結構化狀態 JSON 日誌（512KB 自動輪替）。
-- 51 項自動化單元測試全數通過，核心模組覆蓋率達 **93.9%**（高於 80% 目標）。
+- 61 項自動化單元測試全數通過，核心模組覆蓋率達 **94.4%**（高於 80% 目標）。
+- 提供本機一鍵自動化清理、測試、編譯、上傳與發佈腳本 `publish-github.bat`，並將 GitHub Actions 設為 `workflow_dispatch` 手動觸發，日常推送與發佈 Release **0 消耗** GitHub Actions 免費額度。
 
 ## 專案檔案清單 (Project Files)
 - `src/Core/Native/Win32Api.cs`
@@ -55,5 +56,5 @@ Windows 筆記型電腦使用者在以下兩種核心場景需要鎖定鍵盤：
 - `src/UI/TrayAppContext.cs`
 - `src/Program.cs`
 - `tests/LaptopKeyboardLocker.Tests/*.cs` & `tests/TestRunner.cs`
-- `build.bat`, `run-tests.bat`, `LaptopKeyboardLocker.csproj`, `KeyLock.exe`
+- `build.bat`, `run-tests.bat`, `publish-github.bat`, `LaptopKeyboardLocker.csproj`, `KeyLock.exe`
 

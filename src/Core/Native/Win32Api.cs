@@ -50,6 +50,21 @@ namespace LaptopKeyboardLocker.Core.Native
         public const uint CM_LOCATE_DEVNODE_NORMAL = 0x00000000;
         public const uint CM_DISABLE_PERSIST = 0x00000001;
 
+        // Raw Input 與單一鍵盤來源辨識常數
+        public const int WM_INPUT = 0x00FF;
+        public const uint RID_INPUT = 0x10000003;
+        public const uint RIDI_DEVICENAME = 0x20000007;
+        public const uint RIDEV_INPUTSINK = 0x00000100;
+        public const ushort HID_USAGE_PAGE_GENERIC = 0x01;
+        public const ushort HID_USAGE_GENERIC_KEYBOARD = 0x06;
+        public const uint PM_REMOVE = 0x0001;
+        public const uint LLKHF_EXTENDED = 0x01;
+        public const uint LLKHF_INJECTED = 0x10;
+        public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+        public const uint KEYEVENTF_KEYUP = 0x0002;
+        public const ushort RI_KEY_BREAK = 0x0001;
+        public const ushort RI_KEY_E0 = 0x0002;
+
         #endregion
 
         #region Delegates & Structs
@@ -64,6 +79,54 @@ namespace LaptopKeyboardLocker.Core.Native
             public uint flags;
             public uint time;
             public UIntPtr dwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTDEVICE
+        {
+            public ushort usUsagePage;
+            public ushort usUsage;
+            public uint dwFlags;
+            public IntPtr hwndTarget;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTHEADER
+        {
+            public uint dwType;
+            public uint dwSize;
+            public IntPtr hDevice;
+            public IntPtr wParam;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWKEYBOARD
+        {
+            public ushort MakeCode;
+            public ushort Flags;
+            public ushort Reserved;
+            public ushort VKey;
+            public uint Message;
+            public uint ExtraInformation;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RAWINPUTKEYBOARD
+        {
+            public RAWINPUTHEADER header;
+            public RAWKEYBOARD keyboard;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MSG
+        {
+            public IntPtr hwnd;
+            public uint message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint time;
+            public int pt_x;
+            public int pt_y;
         }
 
         #endregion
@@ -98,6 +161,40 @@ namespace LaptopKeyboardLocker.Core.Native
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetProcessDPIAware();
 
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool RegisterRawInputDevices(
+            [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] RAWINPUTDEVICE[] pRawInputDevices,
+            uint uiNumDevices,
+            uint cbSize);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern uint GetRawInputData(
+            IntPtr hRawInput,
+            uint uiCommand,
+            out RAWINPUTKEYBOARD pData,
+            ref uint pcbSize,
+            uint cbSizeHeader);
+
+        [DllImport("user32.dll", SetLastError = true, EntryPoint = "GetRawInputDeviceInfoW", CharSet = CharSet.Unicode)]
+        public static extern uint GetRawInputDeviceInfo(
+            IntPtr hDevice,
+            uint uiCommand,
+            StringBuilder pData,
+            ref uint pcbSize);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool PeekMessage(
+            out MSG lpMsg,
+            IntPtr hWnd,
+            uint wMsgFilterMin,
+            uint wMsgFilterMax,
+            uint wRemoveMsg);
+
+        [DllImport("user32.dll")]
+        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
         #endregion
 
         #region CfgMgr32 APIs (Device Node Control)
@@ -116,6 +213,9 @@ namespace LaptopKeyboardLocker.Core.Native
 
         [DllImport("cfgmgr32.dll", SetLastError = true)]
         public static extern uint CM_Get_Device_ID_Size(out uint pulLen, uint dnDevInst, uint ulFlags);
+
+        [DllImport("cfgmgr32.dll", SetLastError = true)]
+        public static extern uint CM_Get_Parent(out uint pdnDevInst, uint dnDevInst, uint ulFlags);
 
         #endregion
     }

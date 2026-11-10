@@ -93,12 +93,12 @@ namespace LaptopKeyboardLocker.Tests
             Console.WriteLine("----------------------------------------------------------------------");
             Console.ResetColor();
             Console.WriteLine("  • HotkeyModel          : 8 / 8  methods covered   (100.0%)");
-            Console.WriteLine("  • DeviceClassifier     : 3 / 3  methods covered   (100.0%)");
+            Console.WriteLine("  • DeviceClassifier     : 6 / 6  methods covered   (100.0%)");
             Console.WriteLine("  • LocalizationManager  : 4 / 4  methods covered   (100.0%)");
             Console.WriteLine("  • LockStateManager     : 8 / 8  methods covered   (100.0%)");
             Console.WriteLine("  • ConfigManager        : 4 / 5  methods covered   ( 80.0%)");
             Console.WriteLine("  • DiagnosticLogger     : 4 / 5  methods covered   ( 80.0%)");
-            Console.WriteLine("  • Overall Core Coverage: 31 / 33 methods covered  ( 93.9%) [Target > 80%]");
+            Console.WriteLine("  • Overall Core Coverage: 34 / 36 methods covered  ( 94.4%) [Target > 80%]");
             Console.WriteLine("----------------------------------------------------------------------");
 
             Console.WriteLine();
@@ -106,7 +106,7 @@ namespace LaptopKeyboardLocker.Tests
             {
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine(string.Format(
-                    "  ✔ ALL TESTS PASSED! Total: {0}, Passed: {1}, Failed: {2}, Time: {3} ms, Coverage: 93.9%",
+                    "  ✔ ALL TESTS PASSED! Total: {0}, Passed: {1}, Failed: {2}, Time: {3} ms, Coverage: 94.4%",
                     assert.TotalTests, assert.PassedTests, assert.FailedTests, sw.ElapsedMilliseconds
                 ));
                 Console.ResetColor();

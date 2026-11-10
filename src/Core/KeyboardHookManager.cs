@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using LaptopKeyboardLocker.Core.Native;
@@ -7,16 +9,32 @@ using LaptopKeyboardLocker.Core.Native;
 namespace LaptopKeyboardLocker.Core
 {
     /// <summary>
-    /// 負責模式一（軟體全域鎖定）：透過 Win32 WH_KEYBOARD_LL 攔截鍵盤按鍵事件（包含一般鍵、多媒體鍵、音量鍵與 CapsLock）。
+    /// 負責鍵盤攔截與單一裝置過濾：
+    /// 1. 模式一（全域軟體鎖定）：攔截所有鍵盤按鍵事件（包含一般鍵、多媒體鍵、音量鍵與 CapsLock）。
+    /// 2. 模式二智慧後援（僅攔截內建鍵盤過濾模式）：結合 Win32 Raw Input (WM_INPUT) 辨識硬體來源，僅攔截筆電內建鍵盤，放行外接鍵盤正常打字。
     /// 具備內部實體修飾鍵狀態追蹤表、修飾鍵 WM_KEYUP 放行防卡鍵機制、1ms 非同步解鎖派發與零按鍵記錄 (Zero Keystroke Logging) 安全設計。
     /// </summary>
     public class KeyboardHookManager : IDisposable
     {
+        private static readonly UIntPtr PassthroughExtraInfoTag = new UIntPtr(0x4B4C4F4B); // "KLOK"
+
         private IntPtr hookId = IntPtr.Zero;
         private Win32Api.LowLevelKeyboardProc procDelegate;
         private bool isLocked = false;
+        private bool isInternalOnlyFilter = false;
         private SynchronizationContext uiSyncContext;
         private HotkeyModel cachedHotkey;
+
+        // Raw Input 裝置來源識別快取與狀態
+        private RawInputSinkWindow rawInputWindow;
+        private readonly Dictionary<IntPtr, bool> deviceIsInternalCache = new Dictionary<IntPtr, bool>();
+        private bool lastRawDeviceWasExternal = false;
+        private int lastExternalInputTick = 0;
+        private uint lastSuppressedVk = 0;
+        private uint lastSuppressedScan = 0;
+        private uint lastSuppressedFlags = 0;
+        private bool lastSuppressedWasDown = false;
+        private int lastSuppressedTick = 0;
 
         // 內部維護之實體修飾鍵按下狀態表（解決 WH_KEYBOARD_LL 攔截後 GetAsyncKeyState 失靈問題）
         private bool isCtrlPressed = false;
@@ -29,6 +47,11 @@ namespace LaptopKeyboardLocker.Core
         public bool IsLocked
         {
             get { return isLocked; }
+        }
+
+        public bool IsInternalOnlyFilter
+        {
+            get { return isInternalOnlyFilter; }
         }
 
         public KeyboardHookManager()
@@ -58,14 +81,33 @@ namespace LaptopKeyboardLocker.Core
         }
 
         /// <summary>
-        /// 啟動全域鍵盤攔截鎖定。
+        /// 啟動全域鍵盤攔截鎖定（攔截所有鍵盤）。
         /// </summary>
         public bool StartLock()
+        {
+            return StartLock(false);
+        }
+
+        /// <summary>
+        /// 啟動鍵盤攔截鎖定。
+        /// 當 internalOnlyFilter 為 true 時，透過 Win32 Raw Input 辨識來源裝置，僅攔截筆電內建鍵盤並放行外接鍵盤。
+        /// </summary>
+        public bool StartLock(bool internalOnlyFilter)
         {
             if (isLocked) return true;
 
             uiSyncContext = SynchronizationContext.Current ?? uiSyncContext;
             RefreshCachedHotkey();
+            isInternalOnlyFilter = internalOnlyFilter;
+            deviceIsInternalCache.Clear();
+            lastRawDeviceWasExternal = false;
+            lastExternalInputTick = 0;
+            lastSuppressedVk = 0;
+
+            if (isInternalOnlyFilter)
+            {
+                EnsureRawInputRegistered();
+            }
 
             // 初始化啟動瞬間的實體修飾鍵狀態
             const int keyStatePressedMask = 0x8000;
@@ -89,12 +131,15 @@ namespace LaptopKeyboardLocker.Core
             }
 
             isLocked = true;
-            DiagnosticLogger.Info("SoftwareHookStarted", "Mode=SoftwareHook");
+            DiagnosticLogger.Info(
+                "SoftwareHookStarted",
+                isInternalOnlyFilter ? "Mode=InternalOnlySoftwareFilter" : "Mode=SoftwareHook"
+            );
             return true;
         }
 
         /// <summary>
-        /// 解除全域鍵盤攔截。
+        /// 解除鍵盤攔截。
         /// </summary>
         public void StopLock()
         {
@@ -108,7 +153,141 @@ namespace LaptopKeyboardLocker.Core
 
             ResetModifierStates();
             isLocked = false;
+            isInternalOnlyFilter = false;
             DiagnosticLogger.Info("SoftwareHookStopped", "Mode=SoftwareHook");
+        }
+
+        private void EnsureRawInputRegistered()
+        {
+            try
+            {
+                if (rawInputWindow == null)
+                {
+                    rawInputWindow = new RawInputSinkWindow(this);
+                }
+
+                Win32Api.RAWINPUTDEVICE[] rid = new Win32Api.RAWINPUTDEVICE[1];
+                rid[0].usUsagePage = Win32Api.HID_USAGE_PAGE_GENERIC;
+                rid[0].usUsage = Win32Api.HID_USAGE_GENERIC_KEYBOARD;
+                rid[0].dwFlags = Win32Api.RIDEV_INPUTSINK;
+                rid[0].hwndTarget = rawInputWindow.Handle;
+
+                Win32Api.RegisterRawInputDevices(
+                    rid,
+                    1,
+                    (uint)Marshal.SizeOf(typeof(Win32Api.RAWINPUTDEVICE))
+                );
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.Warn("RawInputRegisterError", ex.Message);
+            }
+        }
+
+        private bool IsRawInputDeviceInternal(IntPtr hDevice)
+        {
+            if (hDevice == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool cached;
+            if (deviceIsInternalCache.TryGetValue(hDevice, out cached))
+            {
+                return cached;
+            }
+
+            uint charCount = 0;
+            Win32Api.GetRawInputDeviceInfo(hDevice, Win32Api.RIDI_DEVICENAME, null, ref charCount);
+            if (charCount == 0)
+            {
+                return true;
+            }
+
+            StringBuilder sb = new StringBuilder((int)charCount + 2);
+            uint res = Win32Api.GetRawInputDeviceInfo(hDevice, Win32Api.RIDI_DEVICENAME, sb, ref charCount);
+            if (res == uint.MaxValue)
+            {
+                return true;
+            }
+
+            string rawPath = sb.ToString();
+            bool isInternal = DeviceClassifier.IsRawDevicePathInternal(rawPath);
+            deviceIsInternalCache[hDevice] = isInternal;
+            return isInternal;
+        }
+
+        private bool TryInspectPendingRawInput(out bool fromInternalDevice)
+        {
+            fromInternalDevice = true;
+            if (rawInputWindow == null || rawInputWindow.Handle == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            Win32Api.MSG msg;
+            if (Win32Api.PeekMessage(out msg, rawInputWindow.Handle, Win32Api.WM_INPUT, Win32Api.WM_INPUT, Win32Api.PM_REMOVE))
+            {
+                uint headerSize = (uint)Marshal.SizeOf(typeof(Win32Api.RAWINPUTHEADER));
+                uint dataSize = (uint)Marshal.SizeOf(typeof(Win32Api.RAWINPUTKEYBOARD));
+                Win32Api.RAWINPUTKEYBOARD rawKb;
+                if (Win32Api.GetRawInputData(msg.lParam, Win32Api.RID_INPUT, out rawKb, ref dataSize, headerSize) != uint.MaxValue)
+                {
+                    fromInternalDevice = IsRawInputDeviceInternal(rawKb.header.hDevice);
+                    lastRawDeviceWasExternal = !fromInternalDevice;
+                    if (!fromInternalDevice)
+                    {
+                        lastExternalInputTick = Environment.TickCount;
+                    }
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void OnRawInputMessageReceived(IntPtr lParam)
+        {
+            if (!isLocked || !isInternalOnlyFilter) return;
+
+            uint headerSize = (uint)Marshal.SizeOf(typeof(Win32Api.RAWINPUTHEADER));
+            uint dataSize = (uint)Marshal.SizeOf(typeof(Win32Api.RAWINPUTKEYBOARD));
+            Win32Api.RAWINPUTKEYBOARD rawKb;
+            if (Win32Api.GetRawInputData(lParam, Win32Api.RID_INPUT, out rawKb, ref dataSize, headerSize) == uint.MaxValue)
+            {
+                return;
+            }
+
+            bool isInternal = IsRawInputDeviceInternal(rawKb.header.hDevice);
+            lastRawDeviceWasExternal = !isInternal;
+
+            if (!isInternal)
+            {
+                int now = Environment.TickCount;
+                lastExternalInputTick = now;
+
+                // 若外接鍵盤的首顆按鍵在 WM_INPUT 抵達前幾毫秒剛被 Hook 暫時攔截，立即重播放行
+                if (lastSuppressedVk != 0 &&
+                    rawKb.keyboard.VKey == lastSuppressedVk &&
+                    unchecked(now - lastSuppressedTick) <= 25)
+                {
+                    uint flags = 0;
+                    if ((lastSuppressedFlags & Win32Api.LLKHF_EXTENDED) != 0 ||
+                        (rawKb.keyboard.Flags & Win32Api.RI_KEY_E0) != 0)
+                    {
+                        flags |= Win32Api.KEYEVENTF_EXTENDEDKEY;
+                    }
+                    if (!lastSuppressedWasDown || (rawKb.keyboard.Flags & Win32Api.RI_KEY_BREAK) != 0)
+                    {
+                        flags |= Win32Api.KEYEVENTF_KEYUP;
+                    }
+
+                    uint vkToReplay = lastSuppressedVk;
+                    uint scanToReplay = lastSuppressedScan;
+                    lastSuppressedVk = 0;
+                    Win32Api.keybd_event((byte)vkToReplay, (byte)scanToReplay, flags, PassthroughExtraInfoTag);
+                }
+            }
         }
 
         private static bool UpdateModifierFlag(Keys key, bool isDown, ref bool ctrl, ref bool alt, ref bool shift, ref bool win)
@@ -149,6 +328,13 @@ namespace LaptopKeyboardLocker.Core
                     Win32Api.KBDLLHOOKSTRUCT hookStruct = (Win32Api.KBDLLHOOKSTRUCT)
                         Marshal.PtrToStructure(lParam, typeof(Win32Api.KBDLLHOOKSTRUCT));
 
+                    // 0. 若為模式二單獨過濾重播之外接鍵盤事件，直接放行
+                    if ((hookStruct.flags & Win32Api.LLKHF_INJECTED) != 0 &&
+                        hookStruct.dwExtraInfo == PassthroughExtraInfoTag)
+                    {
+                        return Win32Api.CallNextHookEx(hookId, nCode, wParam, lParam);
+                    }
+
                     Keys key = (Keys)hookStruct.vkCode;
 
                     // 1. 更新內部修飾鍵狀態表
@@ -179,7 +365,31 @@ namespace LaptopKeyboardLocker.Core
                         }
                     }
 
-                    // 4. 完整攔截所有其他按鍵事件（含多媒體鍵、音量鍵、CapsLock 等）
+                    // 4. 若處於「僅攔截內建鍵盤模式 (isInternalOnlyFilter)」，透過 Raw Input 檢查是否來自外接鍵盤
+                    if (isInternalOnlyFilter)
+                    {
+                        bool fromInternal;
+                        if (TryInspectPendingRawInput(out fromInternal))
+                        {
+                            if (!fromInternal)
+                            {
+                                return Win32Api.CallNextHookEx(hookId, nCode, wParam, lParam);
+                            }
+                        }
+                        else if (lastRawDeviceWasExternal &&
+                                 unchecked(Environment.TickCount - lastExternalInputTick) <= 180)
+                        {
+                            return Win32Api.CallNextHookEx(hookId, nCode, wParam, lParam);
+                        }
+
+                        lastSuppressedVk = hookStruct.vkCode;
+                        lastSuppressedScan = hookStruct.scanCode;
+                        lastSuppressedFlags = hookStruct.flags;
+                        lastSuppressedWasDown = isKeyDown;
+                        lastSuppressedTick = Environment.TickCount;
+                    }
+
+                    // 5. 完整攔截筆電內建鍵盤（或模式一所有鍵盤）按鍵事件
                     return new IntPtr(1);
                 }
             }
@@ -216,7 +426,35 @@ namespace LaptopKeyboardLocker.Core
         public void Dispose()
         {
             StopLock();
+            if (rawInputWindow != null)
+            {
+                if (rawInputWindow.Handle != IntPtr.Zero)
+                {
+                    rawInputWindow.DestroyHandle();
+                }
+                rawInputWindow = null;
+            }
             GC.SuppressFinalize(this);
+        }
+
+        private sealed class RawInputSinkWindow : NativeWindow
+        {
+            private readonly KeyboardHookManager owner;
+
+            public RawInputSinkWindow(KeyboardHookManager parent)
+            {
+                this.owner = parent;
+                CreateHandle(new CreateParams());
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == Win32Api.WM_INPUT)
+                {
+                    owner.OnRawInputMessageReceived(m.LParam);
+                }
+                base.WndProc(ref m);
+            }
         }
     }
 }

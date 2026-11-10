@@ -1,11 +1,9 @@
 name: Build, Test & Release
 
+# 為節省 GitHub Actions 免費額度，改為僅手動觸發 (workflow_dispatch)；
+# 日常測試、編譯、上傳與 GitHub Release 皆由本機 publish-github.bat 自動完成（0 消耗 Actions 額度）
 on:
-  push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main, master ]
+  workflow_dispatch:
 
 permissions:
   contents: write

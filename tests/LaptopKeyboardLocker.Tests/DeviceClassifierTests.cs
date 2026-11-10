@@ -34,7 +34,21 @@ namespace LaptopKeyboardLocker.Tests
                 (int)DeviceClassifier.Classify(@"HID\MSFT0002", "HID-compliant Mouse"),
                 "帶有 Mouse 名稱的裝置必須被強制排除");
 
-            // 4. 外接 USB 與藍牙鍵盤測試
+            // 4. 電競與現代筆電內建嵌入式 HID 鍵盤控制器測試 (ASUS ROG/TUF N-Key, ITE, MSI)
+            assert.IsTrue(DeviceClassifier.IsInternal(@"HID\VID_0B05&PID_1854&COL02\6&36E90261&0&0001", "HID Keyboard Device"),
+                "HID\\VID_0B05&PID_1854 (ASUS ROG/TUF 筆電內置 N-Key 鍵盤) 必須被識別為內建鍵盤");
+            assert.IsTrue(DeviceClassifier.IsInternal(@"USB\VID_0B05&PID_1854\5&16BDD27B&0&11", "USB Input Device"),
+                "USB\\VID_0B05&PID_1854 (ASUS 內置鍵盤複合父節點) 必須被識別為內建鍵盤");
+            assert.IsTrue(DeviceClassifier.IsInternal(@"HID\VID_048D&PID_C100&COL01\6&112233", "HID Keyboard Device"),
+                "HID\\VID_048D (ITE Tech 筆電嵌入式鍵盤控制器) 必須被識別為內建鍵盤");
+            assert.IsTrue(DeviceClassifier.IsInternal(@"HID\VID_1038&PID_1122&COL01\6&445566", "SteelSeries PS/2 Keyboard"),
+                "HID\\VID_1038&PID_1122 (MSI SteelSeries 內建鍵盤) 必須被識別為內建鍵盤");
+            assert.IsTrue(DeviceClassifier.IsExternal(@"HID\VID_0B05&PID_193E&MI_00", "ASUS ROG Falchion Wireless"),
+                "帶有 Falchion 型號之華碩外接機械鍵盤應被排除於內建之外並識別為外接鍵盤");
+
+            // 5. 外接 USB 與藍牙鍵盤測試
+            assert.IsTrue(DeviceClassifier.IsExternal(@"HID\VID_046D&PID_C33C&MI_00\8&2D3670AA&0&0000", "HID Keyboard Device"),
+                "HID\\VID_046D&PID_C33C (Logitech G512 外接 USB 鍵盤) 應被識別為外接鍵盤");
             assert.IsTrue(DeviceClassifier.IsExternal(@"USB\VID_046D&PID_C52B\6&1A2B3C", "Logitech USB Input Device"),
                 "USB\\VID_046D 應被識別為外接鍵盤");
             assert.IsTrue(DeviceClassifier.IsExternal(@"HID\VID_1532&PID_022A&MI_00", "HID Keyboard Device"),
@@ -42,7 +56,18 @@ namespace LaptopKeyboardLocker.Tests
             assert.IsTrue(DeviceClassifier.IsExternal(@"BTHENUM\{00001124-0000-1000-8000-00805F9B34FB}", "Bluetooth Wireless Keyboard"),
                 "BTHENUM 藍牙鍵盤應被識別為外接鍵盤");
 
-            // 5. 空值與邊界防呆測試
+            // 6. Win32 Raw Input 裝置路徑正規化與內外建判斷測試
+            string rawAsusInternal = @"\\?\HID#VID_0B05&PID_1854&COL02#6&36e90261&0&0001#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
+            string rawLogitechExternal = @"\\?\HID#VID_046D&PID_C33C&MI_00#8&2d3670aa&0&0000#{884b96c3-56ef-11d1-bc8c-00a0c91405dd}";
+            assert.AreEqual(@"HID\VID_0B05&PID_1854&COL02\6&36e90261&0&0001",
+                DeviceClassifier.NormalizeRawDevicePath(rawAsusInternal),
+                "NormalizeRawDevicePath 應正確將 Raw Input 路徑轉為標準 PnP Device ID");
+            assert.IsTrue(DeviceClassifier.IsRawDevicePathInternal(rawAsusInternal),
+                "IsRawDevicePathInternal 應將華碩內建鍵盤 Raw Input 路徑識別為內建鍵盤");
+            assert.IsFalse(DeviceClassifier.IsRawDevicePathInternal(rawLogitechExternal),
+                "IsRawDevicePathInternal 應將羅技外接鍵盤 Raw Input 路徑識別為非內建（外接放行）");
+
+            // 7. 空值與邊界防呆測試
             assert.AreEqual((int)DeviceCategory.Unknown, (int)DeviceClassifier.Classify(null, null),
                 "Null 輸入應安全回傳 Unknown");
             assert.AreEqual((int)DeviceCategory.Unknown, (int)DeviceClassifier.Classify("", ""),

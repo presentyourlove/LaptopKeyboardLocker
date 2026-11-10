@@ -220,12 +220,24 @@ namespace LaptopKeyboardLocker.Core
                             anyDisabled = true;
                             DiagnosticLogger.Info("InternalKeyboardDisabled", dev.DeviceId);
                         }
-                        else if (disableRes == Win32Api.CR_NEED_RESTART)
+                        else
                         {
-                            // 若系統回報需要重開機才生效，立即呼叫 Enable 取消擱置的停用標記，防止下次開機鎖死
-                            Win32Api.CM_Enable_DevNode(devInst, 0);
-                            needRestart = true;
-                            DiagnosticLogger.Warn("InternalKeyboardNeedRestart", dev.DeviceId);
+                            if (disableRes == Win32Api.CR_NEED_RESTART)
+                            {
+                                // 若系統回報需要重開機才生效，立即呼叫 Enable 取消擱置的停用標記，防止下次開機鎖死
+                                Win32Api.CM_Enable_DevNode(devInst, 0);
+                            }
+
+                            // 針對複合式內建 HID 鍵盤（如 ASUS N-Key VID_0B05&PID_1854 之 COL02 子集合），嘗試停用其專屬父層輸入控制器節點
+                            if (TryDisableCompositeInternalParent(devInst, dev.DeviceId, dev.Name))
+                            {
+                                anyDisabled = true;
+                            }
+                            else if (disableRes == Win32Api.CR_NEED_RESTART)
+                            {
+                                needRestart = true;
+                                DiagnosticLogger.Warn("InternalKeyboardNeedRestart", dev.DeviceId);
+                            }
                         }
                     }
                 }
@@ -249,6 +261,72 @@ namespace LaptopKeyboardLocker.Core
             }
 
             return DeviceDisableResult.Failed;
+        }
+
+        private bool TryDisableCompositeInternalParent(uint childDevInst, string childDeviceId, string childName)
+        {
+            try
+            {
+                if (!DeviceClassifier.IsKnownLaptopInternalHid(
+                    (childDeviceId ?? string.Empty).ToUpperInvariant(),
+                    (childName ?? string.Empty).ToUpperInvariant()))
+                {
+                    return false;
+                }
+
+                uint parentDevInst;
+                if (Win32Api.CM_Get_Parent(out parentDevInst, childDevInst, 0) != Win32Api.CR_SUCCESS)
+                {
+                    return false;
+                }
+
+                string parentId = GetDeviceIdFromInst(parentDevInst);
+                if (string.IsNullOrEmpty(parentId))
+                {
+                    return false;
+                }
+
+                if (!DeviceClassifier.IsKnownLaptopInternalHid(parentId.ToUpperInvariant(), string.Empty))
+                {
+                    return false;
+                }
+
+                uint parentDisableRes = Win32Api.CM_Disable_DevNode(parentDevInst, 0);
+                if (parentDisableRes == Win32Api.CR_SUCCESS)
+                {
+                    if (!disabledInternalDeviceIds.Contains(parentId))
+                    {
+                        disabledInternalDeviceIds.Add(parentId);
+                    }
+                    DiagnosticLogger.Info("InternalCompositeParentDisabled", parentId);
+                    return true;
+                }
+                else if (parentDisableRes == Win32Api.CR_NEED_RESTART)
+                {
+                    Win32Api.CM_Enable_DevNode(parentDevInst, 0);
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.Warn("CompositeParentDisableError", ex.Message);
+            }
+            return false;
+        }
+
+        private static string GetDeviceIdFromInst(uint devInst)
+        {
+            uint len;
+            if (Win32Api.CM_Get_Device_ID_Size(out len, devInst, 0) != Win32Api.CR_SUCCESS || len == 0)
+            {
+                return string.Empty;
+            }
+
+            StringBuilder sb = new StringBuilder((int)len + 2);
+            if (Win32Api.CM_Get_Device_ID(devInst, sb, len + 2, 0) == Win32Api.CR_SUCCESS)
+            {
+                return sb.ToString();
+            }
+            return string.Empty;
         }
 
         /// <summary>
@@ -295,7 +373,7 @@ namespace LaptopKeyboardLocker.Core
             disabledInternalDeviceIds.Clear();
             PersistDisabledDeviceIds();
 
-            // 3. 掃描 PnP 樹中所有標記為內建的鍵盤裝置，確保全部處於啟用狀態
+            // 3. 掃描 PnP 樹中所有標記為內建的鍵盤與處於已停用 (ErrorCode=22) 的內建複合控制器，確保 100% 復原
             List<KeyboardDeviceInfo> devices = GetKeyboardDevices();
             foreach (KeyboardDeviceInfo dev in devices)
             {
@@ -307,6 +385,32 @@ namespace LaptopKeyboardLocker.Core
                         Win32Api.CM_Enable_DevNode(devInst, 0);
                     }
                 }
+            }
+
+            try
+            {
+                using (ManagementObjectSearcher disabledSearcher = new ManagementObjectSearcher(
+                    "SELECT DeviceID, Name FROM Win32_PnPEntity WHERE ConfigManagerErrorCode = 22"))
+                using (ManagementObjectCollection disabledCollection = disabledSearcher.Get())
+                {
+                    foreach (ManagementObject obj in disabledCollection)
+                    {
+                        string devId = obj["DeviceID"] != null ? obj["DeviceID"].ToString() : string.Empty;
+                        string devName = obj["Name"] != null ? obj["Name"].ToString() : string.Empty;
+                        if (!string.IsNullOrEmpty(devId) && DeviceClassifier.IsInternal(devId, devName))
+                        {
+                            uint devInst;
+                            if (Win32Api.CM_Locate_DevNode(out devInst, devId, Win32Api.CM_LOCATE_DEVNODE_NORMAL) == Win32Api.CR_SUCCESS)
+                            {
+                                Win32Api.CM_Enable_DevNode(devInst, 0);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DiagnosticLogger.Warn("ScanDisabledInternalError", ex.Message);
             }
 
             return allRestored;
